@@ -1,15 +1,15 @@
 package com.codejiwei.gmall.realtime.app.func;
 
+
 import com.alibaba.fastjson.JSONObject;
 import com.codejiwei.gmall.realtime.bean.TableProcess;
 import com.codejiwei.gmall.realtime.common.GmallConfig;
-import com.codejiwei.gmall.realtime.utils.MySQLUtil;
+import com.codejiwei.gmall.realtime.utils.MySQLUtilBak;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
-import java.security.Key;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -23,32 +23,42 @@ import java.util.*;
  * @Date 2021/2/2 14:20
  * @Version 1.0
  **/
-public class TableProcessFunctionBak extends ProcessFunction<JSONObject, JSONObject> {
-    //因为要将维度数据写到侧输出流，所以定义一个侧输出流标签
-    private OutputTag<JSONObject> outputTag;
+/*
+    要读取MySQL配置表，需要建立ORM
 
-    //定义一个Map，用来在内容中 存放查询结果
+    open()
+        1 周期性的读取MySQL配置表数据，2 写入到Map内存， 3 周期型检测phoenix建表
+
+
+    processElement()
+*/
+public class TableProcessFunctionBak extends ProcessFunction<JSONObject, JSONObject> {
+    //1 声明一个Map集合用来存放MySQL配置数据
     private Map<String, TableProcess> tableProcessMap = new HashMap<>();
 
-    //定义一个Set，用来在内存中 存放hbase中的表名
-    private Set<String> existsTables = new HashSet<>();
+    //2 声明一个Set集合用来存放Phoenix(HBase)中的表
+    private Set<String> existTable = new HashSet<>();
 
-    //初始化Phoenix连接
-    private Connection connection = null;
+    //3 声明一个Phoenix连接
+    private Connection conn = null;
 
+    //4 要数据分流 定义一个侧输出流标签
+    OutputTag<JSONObject> outputTag;
 
-    //TODO 1 当第一次来的时候执行一次，初始化
+    public TableProcessFunctionBak(OutputTag<JSONObject> outputTag) {
+        this.outputTag = outputTag;
+    }
+
+    //TODO 初始化操作，第一条数据来的时候，周期执行
     @Override
     public void open(Configuration parameters) throws Exception {
-        //TODO 1.3 注册驱动，创建phoenix连接，只需要初始化一次！所以放在open方法中
+
         Class.forName("org.apache.phoenix.jdbc.PhoenixDriver");
-        connection = DriverManager.getConnection(GmallConfig.PHOENIX_SERVER);
+        conn = DriverManager.getConnection(GmallConfig.PHOENIX_SERVER);
 
-
-        //1.1 初始化配置表信息
+        //用来1 周期性的读取MySQL配置表数据，2 写入到Map内存， 3 周期型检测phoenix建表
         refreshMeta();
 
-        //TODO 1.2 周期性调度
         Timer timer = new Timer();
         timer.schedule(new TimerTask() {
             @Override
@@ -59,51 +69,41 @@ public class TableProcessFunctionBak extends ProcessFunction<JSONObject, JSONObj
 
     }
 
-    //TODO 2 周期型查询配置表
     private void refreshMeta() {
-        //TODO 2.1 查询配置表信息
-        List<TableProcess> tableProcesses = MySQLUtil.queryList("select * from table_process", TableProcess.class, true);
+        //1 读取MySQL配置表中的数据
+        List<TableProcess> queryList = MySQLUtilBak.queryList("select * from table_process", TableProcess.class, true);
 
-        for (TableProcess tableProcess : tableProcesses) {
-            //获取源 表名
+        for (TableProcess tableProcess : queryList) {
+            //拼接key source_table + operator_type
             String sourceTable = tableProcess.getSourceTable();
-            //获取源 操作类型
             String operateType = tableProcess.getOperateType();
-            //获取 sink的输出类型 hbase / kafka
-            String sinkType = tableProcess.getSinkType();
-            //获取 sink的输出表名 / 主题名
-            String sinkTable = tableProcess.getSinkTable();
-            //获取 sink的输出字段
-            String sinkColumns = tableProcess.getSinkColumns();
-            //获取 sink的主键
-            String sinkPk = tableProcess.getSinkPk();
-            //获取 sink的拓展语句
-            String sinkExtend = tableProcess.getSinkExtend();
-
-            //TODO 2.2 拼接key，缓存到内存的map中
             String key = sourceTable + ":" + operateType;
+
+            //2 将查询的数据放到内存的Map中
             tableProcessMap.put(key, tableProcess);
 
-            //TODO 2.3 如果是向HaBase中保存的表，那么判断在内存中是否有改表名
-            if (TableProcess.SINK_TYPE_HBASE.equals(sinkType) && "insert".equals(operateType)) {
-                //如果是sink到hbase，并且操作类型是insert
-                boolean notExist = existsTables.add(sinkTable);
-                if (notExist) {
-                    //如果内存中不存在这个表，那么需要去phoenix创建表
-                    checkTable(sinkTable, sinkColumns, sinkPk, sinkExtend);
-                }
+            //3 判断phoenix（hbase）中是否存在sink的表，如果不存在建表
+            if (tableProcess.getSinkType().equals(TableProcess.SINK_TYPE_HBASE) && "insert".equals(tableProcess.getOperateType())) {
 
+                //如果Set中有了那么就为false
+                boolean notExist = existTable.add(tableProcess.getSinkTable());
+                if (notExist) {
+                    //如果是true，那么phoenix中就没有这张表
+                    checkTable(tableProcess.getSinkTable(), tableProcess.getSinkColumns(), tableProcess.getSinkPk(), tableProcess.getSinkExtend());
+                }
             }
 
         }
         if (tableProcessMap == null || tableProcessMap.size() == 0) {
             throw new RuntimeException("缺少处理信息！");
         }
+
+
     }
 
-    //TODO 3 拼接建表语句，使用phoenix建表
+    //phoenix建表，类似于JDBC操作
     private void checkTable(String sinkTable, String sinkColumns, String sinkPk, String sinkExtend) {
-        //TODO 3.1 主键为空，或扩展字段为空
+        //1 处理主键为空和扩展字段为空
         if (sinkPk == null) {
             sinkPk = "id";
         }
@@ -111,8 +111,7 @@ public class TableProcessFunctionBak extends ProcessFunction<JSONObject, JSONObj
             sinkExtend = "";
         }
 
-
-        //TODO 3.2 拼接建表sql
+        //2 拼接建表语句
         StringBuilder createTableSql = new StringBuilder("create table if not exists " +
                 GmallConfig.HBASE_SCHEMA + "." + sinkTable + " (");
         //sink的表的字段是用,拼接的string，所以切割字符串
@@ -136,10 +135,11 @@ public class TableProcessFunctionBak extends ProcessFunction<JSONObject, JSONObj
         createTableSql.append(")");
         createTableSql.append(sinkExtend);
 
-        //TODO 3.3 创建phoenix操作对象
+        //3 创建phoenix操作对象
         PreparedStatement ps = null;
         try {
-            ps = connection.prepareStatement(createTableSql.toString());
+            ps = conn.prepareStatement(createTableSql.toString());
+
             ps.execute();
         } catch (SQLException throwables) {
             throwables.printStackTrace();
@@ -153,74 +153,74 @@ public class TableProcessFunctionBak extends ProcessFunction<JSONObject, JSONObj
                 }
             }
         }
-
-
     }
 
     //TODO 每条数据来的时候执行
     @Override
-    public void processElement(JSONObject jsonObj, Context context, Collector<JSONObject> collector) throws Exception {
-        //从数据中获取sink到哪张表
-        String table = jsonObj.getString("table");
-        //从数据中获取操作的类型
-        String type = jsonObj.getString("type");
-        //从数据中获取data
+    public void processElement(JSONObject jsonObj, Context ctx, Collector<JSONObject> out) throws Exception {
+        //1 获取每条来的数据的获取数据中的source_table和operator_type拼接成key和内存中的Map数据对比
+        String tableName = jsonObj.getString("table");
+        String OperatorType = jsonObj.getString("type");
+
+        //获取数据中的data字段
         JSONObject dataJsonObj = jsonObj.getJSONObject("data");
 
-        //TODO 还需要做一下修复！因为maxwell的bootstrap获取数据库中原有的数据的时候，会改变type
-        if ("bootstrap-insert".equals(type)){
-            type = "insert";
-            jsonObj.put("type", type);
+
+        //2 数据修复，因为Maxwell的bootstrap模式的insert会编程bootstrap-insert
+        if ("bootstrap-insert".equals(OperatorType)) {
+            OperatorType = "insert";
+            jsonObj.put("type", OperatorType);
         }
 
-        if (tableProcessMap != null && tableProcessMap.size() > 0){
-            //拼接内存中保存的key，判断当前的key是否在内存中存在
-            String key = table + ":" + type;
-            TableProcess tableProcess = tableProcessMap.get(key);
+        //3 与配置表保存到内存Map数据 做匹配
+        if (tableProcessMap != null && tableProcessMap.size() > 0) {
 
-            //如果能够在内存的map中获得，那么说明这个值在内存中有
-            if (tableProcess != null){
-                //那么就给传进来的数据添加一个字段：sink到哪张表中？
+            //拼接key
+            String key = tableName + ":" + OperatorType;
+            TableProcess tableProcess = tableProcessMap.get(key);
+            if (tableProcess != null) {
+                //该条数据从配置表中找到匹配的信息了
+                //3.1 添加一个字段sink_table
                 jsonObj.put("sink_table", tableProcess.getSinkTable());
 
-                //TODO 如果指定了sink的column，那么也需要对多余的列 清洗
+                //3.2 如果指定了sinkColumn，需要对保留的字段进行过滤
                 String sinkColumns = tableProcess.getSinkColumns();
                 if (sinkColumns != null && sinkColumns.length() > 0){
-                    filterColumn(jsonObj.getJSONObject("data"), sinkColumns);
+                    filterColumn(dataJsonObj, sinkColumns);
                 }
 
-            }else {
-                //如果内存中没有
-                System.out.println("No This Key " + key + "in MySQL!");
+            } else {
+                //如果该条信息没有从配置表中找到匹配的信息
+                System.out.println("No this key " + key + "in MySQL");
             }
 
-            //TODO 根据sinkType，将数据输出到不同的流中
+            //4 将数据进行分流: 维度数据分到侧输出流
             if (tableProcess != null && tableProcess.getSinkType().equals(TableProcess.SINK_TYPE_HBASE)){
-                //如果是维度数据，输出到hbase
-                context.output(outputTag, jsonObj);
+                //如果sink到hbase，放到侧输出流输出
+                ctx.output(outputTag, jsonObj);
             }else if (tableProcess != null && tableProcess.getSinkType().equals(TableProcess.SINK_TYPE_KAFKA)){
-                //如果是实时数据，输出到主流 kafka
-                collector.collect(jsonObj);
+                //如果sink到kafka，放到主流输出
+                out.collect(jsonObj);
             }
-
         }
+
 
     }
 
-    private void filterColumn(JSONObject data, String sinkColumns) {
-        //清洗数据
-
+    private void filterColumn(JSONObject dataJsonObj, String sinkColumns) {
+        Set<Map.Entry<String, Object>> entries = dataJsonObj.entrySet();
         String[] columns = sinkColumns.split(",");
-        List<String> columnList = Arrays.asList(columns);
+        List<String> columnsList = Arrays.asList(columns);
 
-        Set<Map.Entry<String, Object>> entries = data.entrySet();
         Iterator<Map.Entry<String, Object>> iterator = entries.iterator();
 
         while (iterator.hasNext()){
-            Map.Entry<String, Object> next = iterator.next();
-            if (!columnList.contains(next.getKey())){
+            Map.Entry<String, Object> entry = iterator.next();
+            if (!columnsList.contains(entry.getKey())){
                 iterator.remove();
             }
         }
+
+
     }
 }

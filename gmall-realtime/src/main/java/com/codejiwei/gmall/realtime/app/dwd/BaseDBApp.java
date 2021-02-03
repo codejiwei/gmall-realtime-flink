@@ -7,14 +7,21 @@ import com.codejiwei.gmall.realtime.app.func.TableProcessFunction;
 import com.codejiwei.gmall.realtime.bean.TableProcess;
 import com.codejiwei.gmall.realtime.utils.MyKafkaUtil;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.java.ExecutionEnvironment;
 import org.apache.flink.runtime.state.filesystem.FsStateBackend;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer;
+import org.apache.flink.streaming.connectors.kafka.KafkaSerializationSchema;
 import org.apache.flink.util.OutputTag;
+import org.apache.kafka.clients.producer.ProducerRecord;
+
+import javax.annotation.Nullable;
 
 /**
  * @ClassName BaseDBApp
@@ -76,17 +83,33 @@ public class BaseDBApp {
         DataStream<JSONObject> hbaseDS = kafkaDS.getSideOutput(hbaseTag);
 
 
-//        kafkaDS.print("kafka>>>>>>>>>>>>>>>>>>>>");
+        kafkaDS.print("kafka>>>>>>>>>>>>>>>>>>>>");
         hbaseDS.print("hbase>>>>>>>>>>>>>>>>>>>>>>>");
 
 
-        //TODO 6 .将侧输出流写入到Phoenix（HBase）
-        hbaseDS.addSink(new DimSink());
-
-        //TODO 7 将主流的数据kafkaDS 写入到Kafka
-//        kafkaDS.addSink();
-
-
+//        //TODO 6 .将侧输出流写入到Phoenix（HBase）
+//        hbaseDS.addSink(new DimSink());
+//
+//        //TODO 7 将主流的数据kafkaDS 写入到Kafka
+//
+//        FlinkKafkaProducer<JSONObject> kafkaSink = MyKafkaUtil.getKafkaSinkBySchema(
+//                new KafkaSerializationSchema<JSONObject>() {
+//                    @Override
+//                    public void open(SerializationSchema.InitializationContext context) throws Exception {
+//                        System.out.println("kafka序列化初始化");
+//                    }
+//
+//                    @Override
+//                    public ProducerRecord<byte[], byte[]> serialize(JSONObject jsonObj, @Nullable Long timestamp) {
+//                        String sinkTopic = jsonObj.getString("sink_table");
+//                        JSONObject dataJsonObj = jsonObj.getJSONObject("data");
+//
+//                        return new ProducerRecord<>(sinkTopic, dataJsonObj.toString().getBytes());
+//                    }
+//                }
+//        );
+//
+//        kafkaDS.addSink(kafkaSink);
 
         env.execute();
     }

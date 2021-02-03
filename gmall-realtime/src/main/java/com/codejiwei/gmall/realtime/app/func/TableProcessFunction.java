@@ -97,7 +97,7 @@ public class TableProcessFunction extends ProcessFunction<JSONObject, JSONObject
             //TODO 2 将数据存入结果Map
             tableProcessMap.put(key, tableProcess);
 
-            //TODO 如果是向HBase中保存的表，那么判断表是否存在
+            //TODO 3 如果是向HBase中保存的表，那么判断表是否存在
             if (TableProcess.SINK_TYPE_HBASE.equals(sinkType) && "insert".equals(operateType)){
                 //如果配置表中 是输出到hbase，并且操作的类型是insert操作，就放到内存的set中
                 //如果添加成功，那么就说明这个表 不存在在set内存中。
