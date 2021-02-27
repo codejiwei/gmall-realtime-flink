@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import com.codejiwei.gmall.realtime.app.func.DimSink;
 import com.codejiwei.gmall.realtime.app.func.TableProcessFunction;
 import com.codejiwei.gmall.realtime.bean.TableProcess;
+import com.codejiwei.gmall.realtime.common.GmallConfig;
 import com.codejiwei.gmall.realtime.utils.MyKafkaUtil;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -37,17 +38,17 @@ public class BaseDBApp {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         //1.2 设置并行度
         env.setParallelism(4);
-        //1.3 设置检查点
-        env.enableCheckpointing(5000, CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointTimeout(60000);  //设置检查点连接延迟
-        env.setStateBackend(new FsStateBackend("hdfs://hadoop102:8020/gmall/flink/checkpoint/baseDBApp"));
-
-        //1.4 重启策略  如果说没有开启检查点ck，那么重启策略就是noRestart，就是不重启
-        //             如果开启了ck，那么默认重启策略 会尝试自动帮你尝试重启，重启Integer.MaxValue
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        //1.4 设置登录用户
-        System.setProperty("HADOOP_USER_NAME", "atguigu");
+//        //1.3 设置检查点
+//        env.enableCheckpointing(5000, CheckpointingMode.EXACTLY_ONCE);
+//        env.getCheckpointConfig().setCheckpointTimeout(60000);  //设置检查点连接延迟
+//        env.setStateBackend(new FsStateBackend(GmallConfig.CHECKPOINT_FILE_HEAD + "baseDBApp"));
+//
+//        //1.4 重启策略  如果说没有开启检查点ck，那么重启策略就是noRestart，就是不重启
+//        //             如果开启了ck，那么默认重启策略 会尝试自动帮你尝试重启，重启Integer.MaxValue
+//        env.setRestartStrategy(RestartStrategies.noRestart());
+//
+//        //1.4 设置登录用户
+//        System.setProperty("HADOOP_USER_NAME", "atguigu");
 
         //TODO 2.接收kafka数据，过滤空值数据
         //2.1 定义kafka消费者的主题、消费者组
@@ -87,29 +88,29 @@ public class BaseDBApp {
         hbaseDS.print("hbase>>>>>>>>>>>>>>>>>>>>>>>");
 
 
-//        //TODO 6 .将侧输出流写入到Phoenix（HBase）
-//        hbaseDS.addSink(new DimSink());
-//
-//        //TODO 7 将主流的数据kafkaDS 写入到Kafka
-//
-//        FlinkKafkaProducer<JSONObject> kafkaSink = MyKafkaUtil.getKafkaSinkBySchema(
-//                new KafkaSerializationSchema<JSONObject>() {
-//                    @Override
-//                    public void open(SerializationSchema.InitializationContext context) throws Exception {
-//                        System.out.println("kafka序列化初始化");
-//                    }
-//
-//                    @Override
-//                    public ProducerRecord<byte[], byte[]> serialize(JSONObject jsonObj, @Nullable Long timestamp) {
-//                        String sinkTopic = jsonObj.getString("sink_table");
-//                        JSONObject dataJsonObj = jsonObj.getJSONObject("data");
-//
-//                        return new ProducerRecord<>(sinkTopic, dataJsonObj.toString().getBytes());
-//                    }
-//                }
-//        );
-//
-//        kafkaDS.addSink(kafkaSink);
+        //TODO 6 .将侧输出流写入到Phoenix（HBase）
+        hbaseDS.addSink(new DimSink());
+
+        //TODO 7 将主流的数据kafkaDS 写入到Kafka
+
+        FlinkKafkaProducer<JSONObject> kafkaSink = MyKafkaUtil.getKafkaSinkBySchema(
+                new KafkaSerializationSchema<JSONObject>() {
+                    @Override
+                    public void open(SerializationSchema.InitializationContext context) throws Exception {
+                        System.out.println("kafka序列化初始化");
+                    }
+
+                    @Override
+                    public ProducerRecord<byte[], byte[]> serialize(JSONObject jsonObj, @Nullable Long timestamp) {
+                        String sinkTopic = jsonObj.getString("sink_table");
+                        JSONObject dataJsonObj = jsonObj.getJSONObject("data");
+
+                        return new ProducerRecord<>(sinkTopic, dataJsonObj.toString().getBytes());
+                    }
+                }
+        );
+
+        kafkaDS.addSink(kafkaSink);
 
         env.execute();
     }

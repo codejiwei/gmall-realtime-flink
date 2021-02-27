@@ -47,11 +47,11 @@ public class BaseLogAPP {
         //1.3 设置Checkpoint
         //每5000ms做一次checkpoint，模式为 EXACTLY_ONCE（默认）
 //        env.enableCheckpointing(5000);
-        env.enableCheckpointing(5000, CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointTimeout(60000);
-        env.setStateBackend(new FsStateBackend("hdfs://hadoop102:8020/gmall/checkpoint/baselogApp"));
-
-        System.setProperty("HADOOP_USER_NAME", "atguigu");
+//        env.enableCheckpointing(5000, CheckpointingMode.EXACTLY_ONCE);
+//        env.getCheckpointConfig().setCheckpointTimeout(60000);
+//        env.setStateBackend(new FsStateBackend("hdfs://hadoop102:8020/gmall/checkpoint/baselogApp"));
+//
+//        System.setProperty("HADOOP_USER_NAME", "atguigu");
 
         //TODO 2.从kafka中读取数据(kafka消费者)
 //        FlinkKafkaConsumer<String> consumer = new FlinkKafkaConsumer<String>()
@@ -159,6 +159,9 @@ public class BaseLogAPP {
                     //如果是启动日志，输出到启动侧输出流
                     context.output(startTag, dataStr);
                 } else {
+                    //TODO 如果不是启动日志，说明是页面日志（页面包含曝光数据！！！），输出到主流
+                    collector.collect(dataStr);
+
                     //如果不是启动日志，获取曝光日志标记
                     JSONArray displays = jsonObj.getJSONArray("displays");
                     //判断是否为曝光日志
@@ -173,9 +176,6 @@ public class BaseLogAPP {
                             displayJsonObj.put("page_id", pageId);
                             context.output(displayTag, displayJsonObj.toString());
                         }
-                    } else {
-                        //如果不是曝光日志，说明是页面日志，输出到主流
-                        collector.collect(dataStr);
                     }
 
                 }

@@ -3,6 +3,7 @@ package com.codejiwei.gmall.realtime.app.func;
 
 import com.alibaba.fastjson.JSONObject;
 import com.codejiwei.gmall.realtime.common.GmallConfig;
+import com.codejiwei.gmall.realtime.utils.DimUtil;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
@@ -45,28 +46,35 @@ public class DimSink extends RichSinkFunction<JSONObject> {
         //获取Phoenix中的数据
         JSONObject dataJsonObj = jsonObj.getJSONObject("data");
 
-        //拼接upsert语句
-        String upsertSql = genUpsertSql(sink_table.toUpperCase(), dataJsonObj);
-        PreparedStatement ps = null;
+        if (dataJsonObj != null && dataJsonObj.size() > 0) {
+            //拼接upsert语句
+            String upsertSql = genUpsertSql(sink_table.toUpperCase(), dataJsonObj);
+            PreparedStatement ps = null;
 
-        try {
-            System.out.println(upsertSql);
-            //创建Phoenix操作对象
-            ps = conn.prepareStatement(upsertSql);
+            try {
+                System.out.println(upsertSql);
+                //创建Phoenix操作对象
+                ps = conn.prepareStatement(upsertSql);
 
-            ps.execute();
+                ps.execute();
 
-            //TODO 注意Phoenix需要手动的提交事务，MySQL是自动提交事务的
-            conn.commit();
-        } catch (SQLException throwables) {
-            throwables.printStackTrace();
-            throw new RuntimeException("执行Sql失败！");
-        } finally {
-            if (ps != null){
-                ps.close();
+                //注意Phoenix需要手动的提交事务，MySQL是自动提交事务的
+                conn.commit();
+            } catch (SQLException throwables) {
+                throwables.printStackTrace();
+                throw new RuntimeException("执行Sql失败！");
+            } finally {
+                if (ps != null){
+                    ps.close();
+                }
             }
-        }
 
+            //TODO 如果是更新操作，需要将Redis中缓存的数据清除掉
+            if (jsonObj.getString("type").equals("update")) {
+                DimUtil.deleteCached(sink_table, dataJsonObj.getString("id"));
+            }
+
+        }
     }
 
     private String genUpsertSql(String tableName, JSONObject dataJsonObj) {

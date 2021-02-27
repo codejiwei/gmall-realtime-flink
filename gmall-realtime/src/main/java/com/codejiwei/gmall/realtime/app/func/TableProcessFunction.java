@@ -16,13 +16,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.*;
 
-/**
- * @ClassName TableProcessFunction
- * @Description TODO
- * @Author codejiwei
- * @Date 2021/2/1 21:24
- * @Version 1.0
- **/
+
 public class TableProcessFunction extends ProcessFunction<JSONObject, JSONObject> {
 
     //TODO 定义一个侧输出流
